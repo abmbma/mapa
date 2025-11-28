@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>MIMOsuma 5G — Cobertura con Barras de Señal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body, html { height:100%; margin:0; background:#0a0e17; font-family:system-ui,sans-serif; overflow:hidden; }
+    #map { height:100%; width:100%; }
+
+    /* Panel superior central */
+    .panel {
+      position:absolute; top:15px; left:50%; transform:translateX(-50%);
+      background:rgba(15,23,42,0.96); backdrop-filter:blur(16px);
+      padding:14px 24px; border-radius:16px; z-index:1000;
+      color:white; box-shadow:0 10px 40px rgba(0,0,0,0.7);
+      min-width:380px; text-align:center;
+    }
+
+    /* BARRAS DE SEÑAL COMO EN EL CELULAR */
+    .signal-bars {
+      position: absolute;
+      top: 18px;
+      left: 18px;
+      background: rgba(0,0,0,0.5);
+      backdrop-filter: blur(10px);
+      padding: 10px 14px;
+      border-radius: 16px;
+      color: white;
+      font-weight: 600;
+      font-size: 14px;
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    }
+    .bars {
+      display: flex;
+      gap: 3px;
+      height: 18px;
+      align-items: end;
+    }
+    .bar {
+      width: 4px;
+      background: #64748b;
+      border-radius: 2px;
+      transition: all 0.4s ease;
+    }
+    .bar.active { background: #10b981; }
+    .bar1 { height: 6px; }
+    .bar2 { height: 10px; }
+    .bar3 { height: 14px; }
+    .bar4 { height: 18px; }
+
+    h2 { margin:0 0 10px; font-size:19px; }
+    .value { font-size:26px; font-weight:800; margin:6px 0; }
+    .controls { display:flex; gap:10px; justify-content:center; margin:12px 0; }
+    button { padding:10px 16px; border:none; border-radius:10px; font-weight:600; cursor:pointer; transition:0.2s; }
+    .start { background:#10b981; color:black; }
+    .stop { background:#475569; color:white; }
+    .reset { background:#334155; color:white; }
+    .slider { margin:16px 0; padding:0 8px; }
+    .slider label { display:block; margin-bottom:6px; font-size:14px; }
+    input[type=range] { width:100%; height:8px; border-radius:4px; background:#334155; accent-color:#22c55e; }
+    .legend {
+      display:flex; justify-content:center; gap:16px; margin-top:10px; font-size:13px; opacity:0.9;
+    }
+    .legend span { display:flex; align-items:center; gap:6px; }
+    .dot { width:12px; height:12px; border-radius:50%; }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- BARRAS DE SEÑAL (como en el celular) -->
+<div class="signal-bars">
+  <div>5G</div>
+  <div class="bars">
+    <div class="bar bar1" id="b1"></div>
+    <div class="bar bar2" id="b2"></div>
+    <div class="bar bar3" id="b3"></div>
+    <div class="bar bar4" id="b4"></div>
+  </div>
+  <div id="dBmText">-72 dBm</div>
+</div>
+
+<!-- Panel central -->
+<div class="panel">
+  <h2>MIMOsuma 5G — Cobertura en Vivo</h2>
+  <div class="value"><span id="signalText">Buena señal</span></div>
+  <div style="font-size:20px; margin:4px 0" id="avgRSSI">-68 dBm</div>
+  
+  <div class="controls">
+    <button class="start" id="startBtn">Iniciar</button>
+    <button class="stop" id="stopBtn">Pausar</button>
+    <button class="reset" id="resetBtn">Reset</button>
+  </div>
+
+  <div class="slider">
+    <label>Impacto Climático (Lluvia/Tormenta)</label>
+    <input type="range" id="weather" min="0" max="100" value="15" step="1">
+    <div style="display:flex;justify-content:space-between;font-size:12px;margin-top:4px">
+      <span>Soleado</span>
+      <span id="weatherLabel">Lluvia ligera</span>
+      <span>Tormenta</span>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><div class="dot" style="background:#10b981"></div> Excelente</span>
+    <span><div class="dot" style="background:#f59e0b"></div> Regular</span>
+    <span><div class="dot" style="background:#ef4444"></div> Mala</span>
+    <span><div class="dot" style="background:#64748b"></div> Sin cobertura</span>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+
+<script>
+const map = L.map('map').setView([4.300, -74.300], 11.4);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: 'OpenStreetMap', maxZoom: 18
+}).addTo(map);
+
+// Antenas
+const antenas = [[4.360,-74.320],[4.300,-74.300],[4.240,-74.280],[4.320,-74.250]];
+antenas.forEach(c => L.circleMarker(c, {radius:11, color:'#06b6d4', weight:3, fillOpacity:0.9})
+  .addTo(map).bindTooltip("Antena 5G", {permanent:false}));
+
+const heat = L.heatLayer([], {
+  radius: 38, blur: 22, maxZoom: 16, max: 1.0,
+  gradient: {0.0:'#64748b', 0.3:'#ef4444', 0.55:'#f59e0b', 0.75:'#22c55e', 1.0:'#10b981'}
+}).addTo(map);
+
+let puntos = [];
+function generarPuntos() {
+  puntos = [];
+  for(let i=0; i<480; i++) {
+    const lat = 4.300 + (Math.random()-0.5)*0.30;
+    const lng = -74.300 + (Math.random()-0.5)*0.40;
+    puntos.push({lat,lng});
+  }
+}
+
+function calcularRSSI(lat, lng, lluvia) {
+  let mejor = -120;
+  antenas.forEach(ant => {
+    const dist = map.distance([lat,lng], ant) / 1000;
+    if (dist > 30) return;
+    let rssi = -42 - 28 * Math.log10(Math.max(1, dist));
+    rssi -= lluvia * 0.28;  // lluvia fuerte = hasta -28 dBm
+    rssi += (Math.random()-0.5)*7;
+    if (rssi > mejor) mejor = rssi;
+  });
+  return Math.max(-118, Math.round(mejor));
+}
+
+function actualizarBarras(rssi) {
+  const b1 = document.getElementById('b1');
+  const b2 = document.getElementById('b2');
+  const b3 = document.getElementById('b3');
+  const b4 = document.getElementById('b4');
+  [b1,b2,b3,b4].forEach(b => b.classList.remove('active'));
+
+  if (rssi >= -80) { b1.classList.add('active'); b2.classList.add('active'); b3.classList.add('active'); b4.classList.add('active'); }
+  else if (rssi >= -90) { b1.classList.add('active'); b2.classList.add('active'); b3.classList.add('active'); }
+  else if (rssi >= -100) { b1.classList.add('active'); b2.classList.add('active'); }
+  else if (rssi >= -110) { b1.classList.add('active'); }
+  // < -110 → sin barras
+
+  document.getElementById('dBmText').textContent = rssi + ' dBm';
+}
+
+let intervalo = null;
+function actualizar() {
+  const lluvia = parseInt(document.getElementById('weather').value);
+  const datos = [];
+  let suma = 0, cont = 0;
+
+  puntos.forEach(p => {
+    const rssi = calcularRSSI(p.lat, p.lng, lluvia);
+    if (rssi > -115) {
+      suma += rssi; cont++;
+      datos.push([p.lat, p.lng, (rssi + 120) / 60]); // normaliza -120→0, -60→1
+    }
+  });
+
+  heat.setLatLngs(datos);
+
+  const promedio = cont ? Math.round(suma / cont) : -120;
+  document.getElementById('avgRSSI').textContent = promedio + ' dBm';
+  actualizarBarras(promedio);
+
+  const texto = promedio > -70 ? "Excelente" :
+                promedio > -85 ? "Buena" :
+                promedio > -100 ? "Regular" : "Mala o sin señal";
+  document.getElementById('signalText').textContent = texto;
+
+  // Etiqueta clima
+  const labels = ["Soleado","Nublado","Lluvia ligera","Lluvia fuerte","Tormenta"];
+  document.getElementById('weatherLabel').textContent = labels[Math.min(4, Math.floor(lluvia/25))];
+}
+
+// Controles
+document.getElementById('startBtn').onclick = () => {
+  if (!intervalo) {
+    intervalo = setInterval(actualizar, 3500);
+    actualizar();
+  }
+};
+document.getElementById('stopBtn').onclick = () => { clearInterval(intervalo); intervalo = null; };
+document.getElementById('resetBtn').onclick = () => { clearInterval(intervalo); intervalo = null; generarPuntos(); actualizar(); };
+document.getElementById('weather').oninput = () => { if (intervalo) actualizar(); };
+
+// Iniciar
+generarPuntos();
+actualizar();
+</script>
+</body>
+</html>
